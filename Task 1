@@ -1,0 +1,316 @@
+npm init -y
+npm install express cors
+node server.js
+const express = require('express');
+const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+app.use(express.static('public')); // serve frontend
+
+const PRODUCTS_FILE = 'products.json';
+const ORDERS_FILE = 'orders.json';
+
+// Seed products if file doesn't exist
+if (!fs.existsSync(PRODUCTS_FILE)) {
+  const seedProducts = [
+    { id: 1, name: "Wireless Headphones", price: 89.99, image: "https://picsum.photos/400/400?random=1", desc: "Bluetooth 5.0, 30hr battery, noise cancelling" },
+    { id: 2, name: "Smart Watch", price: 199.99, image: "https://picsum.photos/400/400?random=2", desc: "Heart rate, GPS, water resistant 50m" },
+    { id: 3, name: "4K Webcam", price: 129.99, image: "https://picsum.photos/400/400?random=3", desc: "Auto-focus, dual mic, privacy shutter" },
+    { id: 4, name: "Mechanical Keyboard", price: 149.99, image: "https://picsum.photos/400/400?random=4", desc: "Hot-swappable, RGB, PBT keycaps" },
+    { id: 5, name: "Portable SSD 1TB", price: 99.99, image: "https://picsum.photos/400/400?random=5", desc: "1050MB/s, USB-C, shock resistant" },
+    { id: 6, name: "Desk Lamp", price: 39.99, image: "https://picsum.photos/400/400?random=6", desc: "LED, touch dimmer, USB charging port" }
+  ];
+  fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(seedProducts));
+}
+if (!fs.existsSync(ORDERS_FILE)) fs.writeFileSync(ORDERS_FILE, JSON.stringify([]));
+
+// GET all products
+app.get('/api/products', (req, res) => {
+  const products = JSON.parse(fs.readFileSync(PRODUCTS_FILE));
+  res.json(products);
+});
+
+// GET single product
+app.get('/api/products/:id', (req, res) => {
+  const products = JSON.parse(fs.readFileSync(PRODUCTS_FILE));
+  const product = products.find(p => p.id == req.params.id);
+  product ? res.json(product) : res.status(404).json({ error: 'Product not found' });
+});
+
+// POST create order
+app.post('/api/orders', (req, res) => {
+  const { items, total, customer } = req.body;
+  if (!items || !total || !customer?.name || !customer?.email) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  
+  const orders = JSON.parse(fs.readFileSync(ORDERS_FILE));
+  const order = {
+    id: Date.now().toString(),
+    items,
+    total,
+    customer,
+    status: 'pending',
+    createdAt: new Date().toISOString()
+  };
+  orders.push(order);
+  fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2));
+  res.json({ success: true, orderId: order.id });
+});
+
+app.listen(3000, () => console.log('Server running on http://localhost:3000'));
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SimpleShop</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: system-ui, sans-serif; }
+body { background: #f5f5f5; }
+header { background: #1a1a1a; color: #fff; padding: 16px; position: sticky; top: 0; z-index: 100; }
+nav { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
+.logo { font-size: 24px; font-weight: 700; }
+.cart-btn { background: #ff9900; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; position: relative; }
+.cart-count { position: absolute; top: -8px; right: -8px; background: #e53e3e; color: #fff; border-radius: 50%; width: 20px; height: 20px; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+.container { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
+.card { background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); transition: transform 0.2s; }
+.card:hover { transform: translateY(-4px); }
+.card img { width: 100%; height: 250px; object-fit: cover; cursor: pointer; }
+.card-body { padding: 16px; }
+.card h3 { font-size: 18px; margin-bottom: 8px; cursor: pointer; }
+.price { font-size: 20px; font-weight: 700; color: #b12704; margin: 8px 0; }
+.btn { background: #ffd814; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: 600; width: 100%; margin-top: 8px; }
+.btn:hover { background: #f7ca00; }
+.btn-secondary { background: #e7e9ec; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 200; }
+.modal.active { display: flex; }
+.modal-content { background: #fff; border-radius: 8px; width: 90%; max-width: 800px; max-height: 90vh; overflow-y: auto; }
+.modal-header { padding: 16px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; }
+.close { font-size: 28px; cursor: pointer; border: none; background: none; }
+.modal-body { padding: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.cart-item { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eee; }
+.cart-item img { width: 80px; height: 80px; object-fit: cover; border-radius: 4px; }
+.cart-item-info { flex: 1; }
+.qty-controls { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.qty-btn { width: 28px; height: 28px; border: 1px solid #ddd; background: #fff; cursor: pointer; border-radius: 4px; }
+.cart-total { padding: 16px; border-top: 2px solid #ddd; font-size: 20px; font-weight: 700; text-align: right; }
+.checkout-form input { width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #ddd; border-radius: 4px; }
+@media (max-width: 768px) { .modal-body { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <nav>
+    <div class="logo">SimpleShop</div>
+    <button class="cart-btn" onclick="openCart()">
+      Cart <span class="cart-count" id="cart-count">0</span>
+    </button>
+  </nav>
+</header>
+
+<div class="container">
+  <div class="grid" id="product-grid"></div>
+</div>
+
+<!-- Product Details Modal -->
+<div class="modal" id="product-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="modal-title"></h2>
+      <button class="close" onclick="closeModal('product-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <img id="modal-img" style="width:100%; border-radius:8px;">
+      <div>
+        <p id="modal-desc" style="margin-bottom:16px; color:#555;"></p>
+        <div class="price" id="modal-price"></div>
+        <button class="btn" id="modal-add-btn">Add to Cart</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Cart Modal -->
+<div class="modal" id="cart-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Shopping Cart</h2>
+      <button class="close" onclick="closeModal('cart-modal')">&times;</button>
+    </div>
+    <div id="cart-items" style="padding: 0 16px;"></div>
+    <div class="cart-total">Total: $<span id="cart-total">0.00</span></div>
+    <div style="padding: 16px;">
+      <button class="btn" onclick="openCheckout()">Proceed to Checkout</button>
+    </div>
+  </div>
+</div>
+
+<!-- Checkout Modal -->
+<div class="modal" id="checkout-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Checkout</h2>
+      <button class="close" onclick="closeModal('checkout-modal')">&times;</button>
+    </div>
+    <div class="checkout-form" style="padding:16px;">
+      <input type="text" id="name" placeholder="Full Name" required>
+      <input type="email" id="email" placeholder="Email" required>
+      <input type="text" id="address" placeholder="Shipping Address" required>
+      <button class="btn" onclick="placeOrder()">Place Order - $<span id="checkout-total">0.00</span></button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:3000/api';
+let products = [];
+let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+
+// Load products
+async function loadProducts() {
+  const res = await fetch(`${API}/products`);
+  products = await res.json();
+  renderProducts();
+  updateCartCount();
+}
+
+function renderProducts() {
+  document.getElementById('product-grid').innerHTML = products.map(p => `
+    <div class="card">
+      <img src="${p.image}" onclick="showProduct(${p.id})">
+      <div class="card-body">
+        <h3 onclick="showProduct(${p.id})">${p.name}</h3>
+        <div class="price">$${p.price.toFixed(2)}</div>
+        <button class="btn" onclick="addToCart(${p.id})">Add to Cart</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// Product details
+function showProduct(id) {
+  const p = products.find(p => p.id === id);
+  document.getElementById('modal-title').innerText = p.name;
+  document.getElementById('modal-img').src = p.image;
+  document.getElementById('modal-desc').innerText = p.desc;
+  document.getElementById('modal-price').innerText = `$${p.price.toFixed(2)}`;
+  document.getElementById('modal-add-btn').onclick = () => { addToCart(id); closeModal('product-modal'); };
+  document.getElementById('product-modal').classList.add('active');
+}
+
+// Cart functions
+function addToCart(id) {
+  const item = cart.find(i => i.id === id);
+  if (item) item.qty++;
+  else cart.push({ id, qty: 1 });
+  saveCart();
+  updateCartCount();
+}
+
+function updateQty(id, delta) {
+  const item = cart.find(i => i.id === id);
+  item.qty += delta;
+  if (item.qty <= 0) cart = cart.filter(i => i.id !== id);
+  saveCart();
+  renderCart();
+}
+
+function removeFromCart(id) {
+  cart = cart.filter(i => i.id !== id);
+  saveCart();
+  renderCart();
+}
+
+function saveCart() {
+  localStorage.setItem('cart', JSON.stringify(cart));
+  updateCartCount();
+}
+
+function updateCartCount() {
+  const count = cart.reduce((sum, i) => sum + i.qty, 0);
+  document.getElementById('cart-count').innerText = count;
+}
+
+function openCart() {
+  renderCart();
+  document.getElementById('cart-modal').classList.add('active');
+}
+
+function renderCart() {
+  const cartItems = cart.map(item => {
+    const p = products.find(prod => prod.id === item.id);
+    return { ...p, qty: item.qty, subtotal: p.price * item.qty };
+  });
+  const total = cartItems.reduce((sum, i) => sum + i.subtotal, 0);
+  
+  document.getElementById('cart-items').innerHTML = cartItems.length ? cartItems.map(i => `
+    <div class="cart-item">
+      <img src="${i.image}">
+      <div class="cart-item-info">
+        <strong>${i.name}</strong>
+        <div>$${i.price.toFixed(2)} x ${i.qty} = $${i.subtotal.toFixed(2)}</div>
+        <div class="qty-controls">
+          <button class="qty-btn" onclick="updateQty(${i.id}, -1)">-</button>
+          <span>${i.qty}</span>
+          <button class="qty-btn" onclick="updateQty(${i.id}, 1)">+</button>
+          <button class="btn-secondary" style="margin-left:auto; padding:4px 8px;" onclick="removeFromCart(${i.id})">Remove</button>
+        </div>
+      </div>
+    </div>
+  `).join('') : '<p style="padding:16px; text-align:center;">Cart is empty</p>';
+  
+  document.getElementById('cart-total').innerText = total.toFixed(2);
+  document.getElementById('checkout-total').innerText = total.toFixed(2);
+}
+
+// Checkout
+function openCheckout() {
+  if (!cart.length) return alert('Cart is empty');
+  closeModal('cart-modal');
+  document.getElementById('checkout-modal').classList.add('active');
+}
+
+async function placeOrder() {
+  const name = document.getElementById('name').value.trim();
+  const email = document.getElementById('email').value.trim();
+  const address = document.getElementById('address').value.trim();
+  if (!name || !email || !address) return alert('Fill all fields');
+
+  const cartItems = cart.map(item => {
+    const p = products.find(prod => prod.id === item.id);
+    return { id: p.id, name: p.name, price: p.price, qty: item.qty };
+  });
+  const total = cartItems.reduce((sum, i) => sum + i.price * i.qty, 0);
+
+  const res = await fetch(`${API}/orders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items: cartItems, total, customer: { name, email, address } })
+  });
+  const data = await res.json();
+  
+  if (data.success) {
+    alert(`Order placed! Order ID: ${data.orderId}`);
+    cart = [];
+    saveCart();
+    closeModal('checkout-modal');
+    document.getElementById('name').value = '';
+    document.getElementById('email').value = '';
+    document.getElementById('address').value = '';
+  }
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('active');
+}
+
+loadProducts();
+</script>
+</body>
+</html>
