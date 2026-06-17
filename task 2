@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MiniSocial</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+body { background: #f0f2f5; color: #1c1e21; }
+header { background: #fff; padding: 12px 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); position: sticky; top: 0; z-index: 100; }
+nav { max-width: 900px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
+.logo { font-size: 24px; font-weight: 700; color: #1877f2; }
+.nav-right { display: flex; gap: 12px; align-items: center; }
+.btn { background: #1877f2; color: #fff; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+.btn-secondary { background: #e4e6eb; color: #050505; }
+.container { max-width: 900px; margin: 20px auto; display: grid; grid-template-columns: 1fr 300px; gap: 20px; padding: 0 16px; }
+.card { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+input, textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; margin: 8px 0; font-size: 15px; }
+textarea { resize: vertical; min-height: 80px; }
+.post { margin-bottom: 20px; }
+.post-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; cursor: pointer; }
+.avatar { width: 40px; height: 40px; border-radius: 50%; background: #1877f2; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; }
+.post-img { width: 100%; border-radius: 8px; margin: 12px 0; max-height: 400px; object-fit: cover; }
+.post-actions { display: flex; gap: 16px; padding: 8px 0; border-top: 1px solid #e4e6eb; border-bottom: 1px solid #e4e6eb; margin: 8px 0; }
+.action { background: none; border: none; cursor: pointer; font-weight: 600; color: #65676b; padding: 6px 8px; border-radius: 4px; }
+.action:hover { background: #f2f2f2; }
+.action.liked { color: #1877f2; }
+.comment { display: flex; gap: 8px; margin: 12px 0; }
+.comment-content { background: #f0f2f5; padding: 8px 12px; border-radius: 16px; flex: 1; }
+.comment-input { display: flex; gap: 8px; margin-top: 12px; }
+.profile-header { text-align: center; }
+.profile-avatar { width: 100px; height: 100px; margin: 0 auto 12px; font-size: 36px; }
+.stats { display: flex; justify-content: center; gap: 24px; margin: 16px 0; }
+.stat { text-align: center; }
+.hidden { display: none; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; }
+.modal-content { background: #fff; padding: 24px; border-radius: 8px; width: 90%; max-width: 400px; }
+.user-list-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; }
+@media (max-width: 768px) {.container { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <nav>
+    <div class="logo">MiniSocial</div>
+    <div class="nav-right">
+      <span id="current-user"></span>
+      <button class="btn btn-secondary" onclick="logout()" id="logout-btn">Logout</button>
+    </div>
+  </nav>
+</header>
+
+<div id="auth-modal" class="modal">
+  <div class="modal-content">
+    <h2 id="auth-title">Login</h2>
+    <input type="text" id="username" placeholder="Username">
+    <input type="password" id="password" placeholder="Password">
+    <button class="btn" onclick="handleAuth()" style="width:100%; margin-top:8px;">Continue</button>
+    <p style="text-align:center; margin-top:12px; cursor:pointer; color:#1877f2;" onclick="toggleAuth()">
+      <span id="auth-switch">Create new account</span>
+    </p>
+  </div>
+</div>
+
+<div class="container" id="app">
+  <main>
+    <div class="card" id="create-post">
+      <textarea id="post-content" placeholder="What's on your mind?"></textarea>
+      <input type="text" id="post-image" placeholder="Image URL - optional">
+      <button class="btn" onclick="createPost()">Post</button>
+    </div>
+    <div id="feed"></div>
+  </main>
+
+  <aside>
+    <div class="card profile-header" id="profile-card">
+      <div class="avatar profile-avatar" id="profile-avatar"></div>
+      <h3 id="profile-name"></h3>
+      <div class="stats">
+        <div class="stat"><strong id="post-count">0</strong><br>Posts</div>
+        <div class="stat"><strong id="follower-count">0</strong><br>Followers</div>
+        <div class="stat"><strong id="following-count">0</strong><br>Following</div>
+      </div>
+      <button class="btn" id="follow-btn" onclick="toggleFollow()" style="width:100%;"></button>
+    </div>
+
+    <div class="card">
+      <h3>Suggested Users</h3>
+      <div id="user-list"></div>
+    </div>
+  </aside>
+</div>
+
+<script>
+// DB layer using localStorage
+const DB = {
+  get users() { return JSON.parse(localStorage.getItem('users') || '[]') },
+  set users(val) { localStorage.setItem('users', JSON.stringify(val)) },
+  get posts() { return JSON.parse(localStorage.getItem('posts') || '[]') },
+  set posts(val) { localStorage.setItem('posts', JSON.stringify(val)) },
+  get currentUser() { return localStorage.getItem('currentUser') },
+  set currentUser(val) { localStorage.setItem('currentUser', val) }
+}
+
+let isLogin = true
+let viewingUser = null
+
+// Auth
+function toggleAuth() {
+  isLogin =!isLogin
+  document.getElementById('auth-title').innerText = isLogin? 'Login' : 'Sign Up'
+  document.getElementById('auth-switch').innerText = isLogin? 'Create new account' : 'Already have an account?'
+}
+
+function handleAuth() {
+  const username = document.getElementById('username').value.trim()
+  const password = document.getElementById('password').value
+  if (!username ||!password) return alert('Fill all fields')
+
+  let users = DB.users
+  if (isLogin) {
+    const user = users.find(u => u.username === username && u.password === password)
+    if (!user) return alert('Invalid credentials')
+    DB.currentUser = username
+  } else {
+    if (users.find(u => u.username === username)) return alert('Username taken')
+    users.push({ username, password, following: [], followers: [] })
+    DB.users = users
+    DB.currentUser = username
+  }
+  initApp()
+}
+
+function logout() {
+  DB.currentUser = null
+  location.reload()
+}
+
+function initApp() {
+  if (!DB.currentUser) return
+  document.getElementById('auth-modal').classList.add('hidden')
+  document.getElementById('current-user').innerText = DB.currentUser
+  viewingUser = DB.currentUser
+  renderProfile()
+  renderFeed()
+  renderUserList()
+}
+
+// Posts
+function createPost() {
+  const content = document.getElementById('post-content').value.trim()
+  const image = document.getElementById('post-image').value.trim()
+  if (!content &&!image) return
+
+  const posts = DB.posts
+  posts.unshift({
+    id: Date.now().toString(),
+    user: DB.currentUser,
+    content,
+    image,
+    likes: [],
+    comments: [],
+    createdAt: new Date().toISOString()
+  })
+  DB.posts = posts
+  document.getElementById('post-content').value = ''
+  document.getElementById('post-image').value = ''
+  renderFeed()
+  renderProfile()
+}
+
+function toggleLike(postId) {
+  const posts = DB.posts
+  const post = posts.find(p => p.id === postId)
+  const idx = post.likes.indexOf(DB.currentUser)
+  if (idx > -1) post.likes.splice(idx, 1)
+  else post.likes.push(DB.currentUser)
+  DB.posts = posts
+  renderFeed()
+}
+
+function addComment(postId) {
+  const input = document.getElementById(`comment-${postId}`)
+  const content = input.value.trim()
+  if (!content) return
+
+  const posts = DB.posts
+  const post = posts.find(p => p.id === postId)
+  post.comments.push({ user: DB.currentUser, content, createdAt: new Date().toISOString() })
+  DB.posts = posts
+  input.value = ''
+  renderFeed()
+}
+
+// Follow system
+function toggleFollow() {
+  if (viewingUser === DB.currentUser) return
+  const users = DB.users
+  const me = users.find(u => u.username === DB.currentUser)
+  const them = users.find(u => u.username === viewingUser)
+
+  const followingIdx = me.following.indexOf(viewingUser)
+  if (followingIdx > -1) {
+    me.following.splice(followingIdx, 1)
+    them.followers.splice(them.followers.indexOf(DB.currentUser), 1)
+  } else {
+    me.following.push(viewingUser)
+    them.followers.push(DB.currentUser)
+  }
+  DB.users = users
+  renderProfile()
+  renderFeed()
+}
+
+// Rendering
+function renderFeed() {
+  const users = DB.users
+  const me = users.find(u => u.username === DB.currentUser)
+  const feedUsers = [DB.currentUser,...me.following]
+  const posts = DB.posts.filter(p => feedUsers.includes(p.user))
+
+  document.getElementById('feed').innerHTML = posts.map(post => `
+    <div class="card post">
+      <div class="post-header" onclick="viewProfile('${post.user}')">
+        <div class="avatar">${post.user[0].toUpperCase()}</div>
+        <div>
+          <strong>${post.user}</strong>
+          <div style="font-size:12px; color:#65676b;">${new Date(post.createdAt).toLocaleString()}</div>
+        </div>
+      </div>
+      <p>${post.content}</p>
+      ${post.image? `<img src="${post.image}" class="post-img" onerror="this.style.display='none'">` : ''}
+      <div class="post-actions">
+        <button class="action ${post.likes.includes(DB.currentUser)? 'liked' : ''}" onclick="toggleLike('${post.id}')">
+          👍 ${post.likes.length} Like
+        </button>
+        <button class="action">💬 ${post.comments.length} Comment</button>
+      </div>
+      ${post.comments.map(c => `
+        <div class="comment">
+          <div class="avatar" style="width:32px;height:32px;font-size:14px;">${c.user[0].toUpperCase()}</div>
+          <div class="comment-content"><strong>${c.user}</strong> ${c.content}</div>
+        </div>
+      `).join('')}
+      <div class="comment-input">
+        <input type="text" id="comment-${post.id}" placeholder="Write a comment...">
+        <button class="btn" onclick="addComment('${post.id}')">Send</button>
+      </div>
+    </div>
+  `).join('') || '<div class="card">No posts yet. Follow users or create your first post!</div>'
+}
+
+function renderProfile() {
+  const user = DB.users.find(u => u.username === viewingUser)
+  const userPosts = DB.posts.filter(p => p.user === viewingUser)
+  document.getElementById('profile-avatar').innerText = viewingUser[0].toUpperCase()
+  document.getElementById('profile-name').innerText = viewingUser
+  document.getElementById('post-count').innerText = userPosts.length
+  document.getElementById('follower-count').innerText = user.followers.length
+  document.getElementById('following-count').innerText = user.following.length
+
+  const followBtn = document.getElementById('follow-btn')
+  if (viewingUser === DB.currentUser) {
+    followBtn.style.display = 'none'
+  } else {
+    followBtn.style.display = 'block'
+    const me = DB.users.find(u => u.username === DB.currentUser)
+    followBtn.innerText = me.following.includes(viewingUser)? 'Unfollow' : 'Follow'
+    followBtn.className = me.following.includes(viewingUser)? 'btn btn-secondary' : 'btn'
+  }
+}
+
+function renderUserList() {
+  const users = DB.users.filter(u => u.username!== DB.currentUser)
+  document.getElementById('user-list').innerHTML = users.map(user => `
+    <div class="user-list-item">
+      <div style="display:flex; align-items:center; gap:8px; cursor:pointer;" onclick="viewProfile('${user.username}')">
+        <div class="avatar" style="width:32px;height:32px;font-size:14px;">${user.username[0].toUpperCase()}</div>
+        <span>${user.username}</span>
+      </div>
+    </div>
+  `).join('') || 'No other users yet'
+}
+
+function viewProfile(username) {
+  viewingUser = username
+  renderProfile()
+  window.scrollTo(0, 0)
+}
+
+// Init
+if (DB.currentUser) initApp()
+</script>
+</body>
+</html>
